@@ -3,6 +3,7 @@ use std::io::{BufReader, Read};
 
 use crate::{chunk_type::ChunkType, Error};
 
+#[derive(Debug)]
 pub struct Chunk {
     length: u32,
     chunk_type: ChunkType,
@@ -43,24 +44,38 @@ impl Chunk {
         &self.chunk_type
     }
 
+    pub fn data_as_string(&self) -> crate::Result<String> {
+        String::from_utf8(self.chunk_data.clone()).map_err(|_| Box::from("Error"))
+    }
+
+    pub fn as_bytes(&self) -> Vec<u8> {
+        let chunk_data: Vec<u8> = self
+            .length
+            .to_be_bytes()
+            .iter()
+            .chain(self.chunk_type.bytes().iter())
+            .chain(self.chunk_data.iter())
+            .chain(self.crc.to_be_bytes().iter())
+            .copied()
+            .collect();
+
+        chunk_data
+    }
+
     fn calculate_crc(bytes: &[u8]) -> u32 {
         let crc: crc::Crc<u32> = crc::Crc::<u32>::new(&crc::CRC_32_ISO_HDLC);
         crc.checksum(bytes)
-    }
-
-    pub fn data_as_string(&self) -> crate::Result<String> {
-        String::from_utf8(self.chunk_data.clone()).map_err(|_| Box::from("Error"))
     }
 }
 
 impl fmt::Display for Chunk {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Chunk {{",)?;
+        writeln!(f, "Chunk {{")?;
         writeln!(f, "  Length: {}", self.length())?;
         writeln!(f, "  Type: {}", self.chunk_type())?;
         writeln!(f, "  Data: {} bytes", self.data().len())?;
         writeln!(f, "  Crc: {}", self.crc())?;
-        writeln!(f, "}}",)?;
+        writeln!(f, "}}")?;
         Ok(())
     }
 }
@@ -92,7 +107,10 @@ impl TryFrom<&[u8]> for Chunk {
         let calculated_crc = Self::calculate_crc(&bytes_to_calc);
 
         if crc != calculated_crc {
-            return Err(Box::from("Invalid CRC"));
+            return Err(Box::from(format!(
+                "Invalid CRC:\n\tReceived: {}\n\tExpected: {}",
+                crc, calculated_crc
+            )));
         }
 
         Ok(Self {
