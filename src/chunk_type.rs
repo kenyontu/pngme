@@ -1,6 +1,19 @@
 use std::{fmt::Display, str::FromStr};
 
-use crate::{Error, Result};
+use anyhow::{ bail, ensure, Context, Error, Result};
+
+mod error {
+    pub fn invalid_length(str_chunk_type: &str) -> String {
+        format!(
+            "The chunk type \"{}\" is invalid, it should have 4 characters",
+            str_chunk_type
+        )
+    }
+
+    pub fn invalid_character(str_chunk_type: &str, invalid_char: &char, pos: &usize) -> String {
+        format!("The chunk type \"{}\" contains the invalid character '{}' at position {}, it should only contain characters that match the [a-zA-Z] pattern", str_chunk_type, invalid_char, pos)
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub struct ChunkType {
@@ -8,64 +21,116 @@ pub struct ChunkType {
 }
 
 impl ChunkType {
-    pub fn has_letters_only(bytes: &[u8]) -> bool {
-        for byte in bytes.iter() {
-            let is_valid = byte.is_ascii_lowercase() || byte.is_ascii_uppercase();
-            if !is_valid {
-                return false;
-            }
-        }
+    /// Checks if the chunk type is appropriate for storing hidden messages
+    pub fn is_valid_for_message(&self) -> Result<()> {
+        // Should be a valid chunk type
+        self.is_valid()?;
 
-        return true;
+        // Should be non-critical
+        ensure!(
+            !self.is_critical(), 
+            "The 1st letter in the chunk type \"{}\" is uppercase, which marks the chunk as critical. Hidden messages should be hidden in non-critical chunks, so change it to be lowercase.", self.to_string()
+        );
+
+        // Should be private
+        ensure!(
+            !self.is_public(),
+            "The 2nd letter in the chunk type \"{}\" is uppercase, which marks the chunk as public. Hidden messages should be hidden in private chunks, so change it to be lowercase.", self.to_string()
+        );
+
+        // Should be safe to copy
+        ensure!(
+            self.is_safe_to_copy(),
+            "The 4th letter in the chunk type \"{}\" is uppercase, which marks the chunk as unsafe to copy. Hidden messages should be hidden in safe to copy chunks, so change it to be lowercase.", self.to_string()
+        );
+
+        Ok(())
     }
 
-    pub fn is_valid(&self) -> bool {
-        if self.bytes.len() != 4 {
-            return false;
+    /// Checks if the length of this chunk type is valid
+    pub fn is_length_valid(&self) -> bool {
+        self.bytes.len() == 4
+    }
+
+    /// Checks if the chunk type is valid according to the PNG spec
+    pub fn is_valid(&self) -> Result<()> {
+        if let Some((c, i)) = Self::validate_chars(&self.bytes) {
+            bail!(error::invalid_character(&self.to_string(), &c, &i));
         }
 
-        if !self.is_reserved_bit_valid() {
-            return false;
-        }
+        ensure!(
+            self.is_length_valid(),
+            error::invalid_length(&self.to_string())
+        );
 
-        if !ChunkType::has_letters_only(&self.bytes) {
-            return false;
-        }
+        ensure!(
+            self.is_reserved_bit_valid(),
+            "The 3rd letter in the chunk type \"{}\" is lowercase, the PNG spec requires this letter to be uppercase.", self.to_string()
+        );
 
-        true
+        Ok(())
     }
 
     pub fn bytes(&self) -> [u8; 4] {
         self.bytes
     }
 
+    /// A chunk type is critical if:
+    ///
+    /// - It's 1st character is uppercase; or
+    /// - The 5th bit of the first byte is 1
     pub fn is_critical(&self) -> bool {
         (self.bytes[0] & (1 << 5)) == 0
     }
 
+    /// A chunk type is public if:
+    ///
+    /// - It's 2nd character is uppercase; or
+    /// - The 5th bit of the second byte is 1
     pub fn is_public(&self) -> bool {
         (self.bytes[1] & (1 << 5)) == 0
     }
 
+    /// The reserved bit of a chunk type is valid if:
+    ///
+    /// - It's 3rd character is uppercase; or
+    /// - The 5th bit of the third byte is 1
     pub fn is_reserved_bit_valid(&self) -> bool {
         (self.bytes[2] & (1 << 5)) == 0
     }
 
+    /// A chunk is safe to copy if:
+    ///
+    /// - It's 4th character is lowercase; or
+    /// - The 5th bit of the fourth byte is 0
     pub fn is_safe_to_copy(&self) -> bool {
         (self.bytes[3] & (1 << 5)) > 0
+    }
+
+    /// Checks if a slice of bytes contain non-ascii letters.
+    ///
+    /// If there's an invalid character, returns a tuple with the invalid character and its
+    /// position (zero-based).
+    pub fn validate_chars(bytes: &[u8]) -> Option<(char, usize)> {
+        for (i, byte) in bytes.iter().enumerate() {
+            let is_valid = byte.is_ascii_lowercase() || byte.is_ascii_uppercase();
+            if !is_valid {
+                return Some((*byte as char, i));
+            }
+        }
+
+        None
     }
 }
 
 impl TryFrom<[u8; 4]> for ChunkType {
     type Error = Error;
 
-    fn try_from(value: [u8; 4]) -> Result<Self> {
-        let chunk_type = Self {
-            bytes: value.try_into()?,
-        };
-        if !chunk_type.is_valid() {
-            return Err(Box::from("Invalid"));
-        }
+    fn try_from(bytes: [u8; 4]) -> Result<Self, Self::Error> {
+        let chunk_type = Self { bytes };
+
+        chunk_type.is_valid()?;
+
         Ok(chunk_type)
     }
 }
@@ -73,18 +138,21 @@ impl TryFrom<[u8; 4]> for ChunkType {
 impl FromStr for ChunkType {
     type Err = Error;
 
-    fn from_str(s: &str) -> Result<Self> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         let bytes = s.as_bytes();
 
         // From the tests, this should return an error if the bytes are not a valid lowercase or
         // uppercase ascii character
-        if !ChunkType::has_letters_only(&bytes) {
-            return Err(Box::from("Should only have letters"));
+        if let Some((c, i)) = Self::validate_chars(bytes) {
+            bail!(error::invalid_character(s, &c, &i));
         }
 
+        ensure!(bytes.len() == 4, error::invalid_length(s));
+
         let chunk_type = Self {
-            bytes: s.as_bytes().try_into()?,
+            bytes: bytes.try_into().context("Failed to convert bytes")?,
         };
+
         Ok(chunk_type)
     }
 }
@@ -171,13 +239,13 @@ mod tests {
     #[test]
     pub fn test_valid_chunk_is_valid() {
         let chunk = ChunkType::from_str("RuSt").unwrap();
-        assert!(chunk.is_valid());
+        assert!(chunk.is_valid().is_ok());
     }
 
     #[test]
     pub fn test_invalid_chunk_is_valid() {
         let chunk = ChunkType::from_str("Rust").unwrap();
-        assert!(!chunk.is_valid());
+        assert!(chunk.is_valid().is_err());
 
         let chunk = ChunkType::from_str("Ru1t");
         assert!(chunk.is_err());

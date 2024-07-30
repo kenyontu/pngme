@@ -1,3 +1,4 @@
+use anyhow::{bail, ensure, Context, Error, Result};
 use std::{
     fmt::Display,
     fs::File,
@@ -23,10 +24,23 @@ impl Png {
         }
     }
 
-    pub fn from_file<P: AsRef<Path>>(path: P) -> crate::Result<Self> {
-        let mut file = File::open(path)?;
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let mut file = File::open(path).context(format!("Unable to open file"))?;
+
         let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)?;
+        file.read_to_end(&mut bytes)
+            .context("Unable to read file")?;
+
+        ensure!(bytes.len() >= 8, "Invalid PNG file");
+
+        let mut header_bytes = [0u8; 8];
+        // Since we make sure [bytes]'s length is at least 8, `clone_from_slice` should not panic
+        header_bytes.clone_from_slice(&bytes[0..8]);
+
+        ensure!(
+            Self::is_png_header(header_bytes),
+            "Invalid PNG file, the file does not have a valid PNG header"
+        );
 
         Self::try_from(&bytes[..])
     }
@@ -67,14 +81,13 @@ impl Png {
         None
     }
 
-    pub fn remove_first_chunk(&mut self, chunk_type_str: &str) -> crate::Result<Chunk> {
+    pub fn remove_first_chunk(&mut self, chunk_type_str: &str) -> Option<Chunk> {
         let pos = self
             .chunks
             .iter()
-            .position(|c| c.chunk_type().to_string() == chunk_type_str)
-            .ok_or::<crate::Error>(Box::from("Chunk not found"))?;
+            .position(|c| c.chunk_type().to_string() == chunk_type_str)?;
 
-        Ok(self.chunks.remove(pos))
+        Some(self.chunks.remove(pos))
     }
 
     pub fn as_bytes(&self) -> Vec<u8> {
@@ -90,31 +103,36 @@ impl Png {
 }
 
 impl TryFrom<&[u8]> for Png {
-    type Error = crate::Error;
+    type Error = Error;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
         let mut reader = BufReader::new(value);
         let mut chunks: Vec<Chunk> = Vec::new();
 
         let mut header_buffer = [0u8; 8];
-        reader.read_exact(&mut header_buffer)?;
-        if !Png::is_png_header(header_buffer) {
-            return Err(Box::from("File is not a valid PNG"));
-        }
+        reader
+            .read_exact(&mut header_buffer)
+            .context("Unable to read header bytes")?;
+
+        ensure!(Png::is_png_header(header_buffer), "Invalid PNG file");
 
         loop {
             let mut length_buffer = [0u8; 4];
             if let Err(e) = reader.read_exact(&mut length_buffer) {
+                // No more bytes to read
                 if e.kind() == io::ErrorKind::UnexpectedEof {
                     break;
                 }
-                return Err(Box::from(e));
+
+                bail!("Unable to read length bytes: {}", e);
             };
 
             let length = u32::from_be_bytes(length_buffer);
 
             let mut data_buffer = vec![0u8; length as usize + 8];
-            reader.read_exact(&mut data_buffer)?;
+            reader
+                .read_exact(&mut data_buffer)
+                .context("Unable to read data bytes")?;
 
             let mut chunk_bytes = Vec::new();
             chunk_bytes.extend(length_buffer);
@@ -176,8 +194,6 @@ mod tests {
     }
 
     fn chunk_from_strings(chunk_type: &str, data: &str) -> crate::Result<Chunk> {
-        use std::str::FromStr;
-
         let chunk_type = ChunkType::from_str(chunk_type)?;
         let data: Vec<u8> = data.bytes().collect();
 

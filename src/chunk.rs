@@ -1,7 +1,9 @@
 use core::fmt;
 use std::io::{BufReader, Read};
 
-use crate::{chunk_type::ChunkType, Error};
+use anyhow::{ensure, Context, Error, Result};
+
+use crate::chunk_type::ChunkType;
 
 #[derive(Debug)]
 pub struct Chunk {
@@ -44,8 +46,8 @@ impl Chunk {
         &self.chunk_type
     }
 
-    pub fn data_as_string(&self) -> crate::Result<String> {
-        String::from_utf8(self.chunk_data.clone()).map_err(|_| Box::from("Error"))
+    pub fn data_as_string(&self) -> Result<String> {
+        String::from_utf8(self.chunk_data.clone()).context("Unable to get message from data")
     }
 
     pub fn as_bytes(&self) -> Vec<u8> {
@@ -70,12 +72,12 @@ impl Chunk {
 
 impl fmt::Display for Chunk {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Chunk {{")?;
+        writeln!(f, "Chunk {{",)?;
         writeln!(f, "  Length: {}", self.length())?;
         writeln!(f, "  Type: {}", self.chunk_type())?;
         writeln!(f, "  Data: {} bytes", self.data().len())?;
         writeln!(f, "  Crc: {}", self.crc())?;
-        writeln!(f, "}}")?;
+        writeln!(f, "}}",)?;
         Ok(())
     }
 }
@@ -87,18 +89,28 @@ impl TryFrom<&[u8]> for Chunk {
         let mut reader = BufReader::new(data);
 
         let mut length_buffer: [u8; 4] = [0; 4];
-        reader.read_exact(&mut length_buffer)?;
+        reader
+            .read_exact(&mut length_buffer)
+            .context("Unable to read length bytes")?;
         let length = u32::from_be_bytes(length_buffer);
 
         let mut chunk_type_buffer: [u8; 4] = [0; 4];
-        reader.read_exact(&mut chunk_type_buffer)?;
+        reader
+            .read_exact(&mut chunk_type_buffer)
+            .context("Unable to read chunk type bytes")?;
+
         let chunk_type = ChunkType::try_from(chunk_type_buffer)?;
 
         let mut data_buffer: Vec<u8> = vec![0u8; length as usize];
-        reader.read_exact(&mut data_buffer)?;
+        reader
+            .read_exact(&mut data_buffer)
+            .context("Unable to read data bytes")?;
 
         let mut crc_buffer = [0u8; 4];
-        reader.read_exact(&mut crc_buffer)?;
+        reader
+            .read_exact(&mut crc_buffer)
+            .context("Unable to read crc bytes")?;
+
         let crc = u32::from_be_bytes(crc_buffer);
 
         let mut bytes_to_calc: Vec<u8> = Vec::new();
@@ -106,12 +118,12 @@ impl TryFrom<&[u8]> for Chunk {
         bytes_to_calc.extend(&data_buffer);
         let calculated_crc = Self::calculate_crc(&bytes_to_calc);
 
-        if crc != calculated_crc {
-            return Err(Box::from(format!(
-                "Invalid CRC:\n\tReceived: {}\n\tExpected: {}",
-                crc, calculated_crc
-            )));
-        }
+        ensure!(
+            crc == calculated_crc,
+            "Invalid CRC, received: {}, expected: {}",
+            crc,
+            calculated_crc
+        );
 
         Ok(Self {
             length,
