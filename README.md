@@ -4,11 +4,11 @@ A PNGme implementation following the instructions from the [PNGme Book](https://
 
 This is a practice project where you learn how to work with bytes by building a CLI application that encodes and decodes text messages in PNG images
 
-# How are messges hidden?
+# How are messages hidden?
 
 PNG files consist of a specific header followed by a series of chunks. Each chunk has a type used to identify it's contents, some contain the image data while others contain additional information like last modified data, color space information, etc.
 
-PNGs may also contain chunks with custom types that can hold any kind of data. Since these chunks are not in the PNG spec, they are normaly ignored by image decoders and require specialized software to read them. Messages are stored in these chunks.
+PNGs may also contain chunks with custom types that can hold any kind of data. Since these chunks are not in the PNG spec, they are normally ignored by image decoders and require specialized software to read them. Messages are stored in these chunks.
 
 # Commands
 
@@ -38,7 +38,7 @@ Parameters:
 
 ### Custom Chunk Types
 
-Chunk types are composed of 4 letters, in the ranges a-z and A-Z of the english alphabet, eg. `abCd`. Depending on whether a letter is uppercase or not, it can have a different meaning.
+Chunk types are composed of 4 letters, in the ranges a-z and A-Z of the English alphabet, eg. `abCd`. Depending on whether a letter is uppercase or not, it can have a different meaning.
 
 To store messages, the cases for each letter should be `LLUL`, where `L` stands for lowercase and `U` for uppercase. Check the reasons below:
 
