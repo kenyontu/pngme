@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use std::{fs, io::Write, path::Path, str::FromStr};
+use std::{collections::HashSet, fs, io::Write, path::Path, str::FromStr};
 
 use clap::Parser;
 use cli::{Cli, Commands, DecodeArgs, EncodeArgs, PrintArgs, RemoveArgs};
@@ -80,12 +80,21 @@ fn decode(args: DecodeArgs) -> Result<()> {
     Ok(())
 }
 
-/// Prints all chunks of an image
+/// Prints private chunk types in the image
 fn print(args: PrintArgs) -> Result<()> {
     let path = Path::new(&args.file_path);
     let png = Png::from_file(path).context("Unable to load image file")?;
 
-    println!("{}", png);
+    let mut chunk_types = HashSet::new();
+
+    for chunk in png.chunks().iter() {
+        let chunk_type = chunk.chunk_type();
+        if !chunk_type.is_public() {
+            chunk_types.insert(chunk.chunk_type().to_string());
+        }
+    }
+
+    println!("{}", chunk_types.into_iter().collect::<Vec<_>>().join("\n"));
 
     Ok(())
 }

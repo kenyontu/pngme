@@ -48,7 +48,7 @@ pub enum Commands {
     /// Prints hidden messages in chunks of a specific chunk type
     Decode(DecodeArgs),
 
-    /// Prints all chunks of a PNG image
+    /// Prints private chunk types in the image
     Print(PrintArgs),
 
     /// Removes all chunks of a specific chunk type. This will overwrite the file.
