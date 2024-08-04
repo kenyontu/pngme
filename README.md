@@ -24,7 +24,8 @@ pngme encode <file> <chunk_type> <message> [output_file]
 # Adds a hidden message to cat.png in a chunk of type "ruSt"
 pngme encode cat.png ruSt "Hi!"
 
-# Creates a copy of cat.png in cat2.png containing the hidden message in a chunk of type "ruSt". The original image is untouched
+# Creates a copy of cat.png in cat2.png containing the hidden message
+# in a chunk of type "ruSt". The original image is untouched
 pngme encode cat.png ruSt "Hi" cat2.png
 ```
 
